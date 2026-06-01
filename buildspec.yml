@@ -32,7 +32,7 @@ phases:
 
       # Print environment for debugging
       - echo "ECR Repository: $ECR_REPOSITORY_URL"
-      - echo "Image Tag: $IMAGE_TAG"
+      - 'echo "Image Tag: $IMAGE_TAG"'
       - echo "Container Name: $CONTAINER_NAME"
 
   # ── Build: Build and tag Docker image ─────────────────────────────────────
