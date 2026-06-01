@@ -1,0 +1,98 @@
+################################################################################
+# buildspec.yml
+# CodeBuild build specification - place this in the root of your application repo
+# Environment variables are injected by the CodeBuild project configuration
+################################################################################
+
+version: 0.2
+
+env:
+  variables:
+    DOCKER_BUILDKIT: "1"        # Enable BuildKit for faster, more efficient builds
+  # Optionally read secrets from Secrets Manager:
+  # secrets-manager:
+  #   DOCKER_HUB_PASSWORD: "myapp/dockerhub:password"
+
+phases:
+  # ── Pre-Build: Authenticate and set variables ─────────────────────────────
+  pre_build:
+    commands:
+      - echo "=== Pre-Build Phase ==="
+      - echo "Build started at $(date)"
+      - echo "Git commit SHA: $CODEBUILD_RESOLVED_SOURCE_VERSION"
+
+      # Set image tag to short commit SHA for traceability
+      - export IMAGE_TAG="${CODEBUILD_RESOLVED_SOURCE_VERSION:0:8}"
+      - export IMAGE_URI="${ECR_REPOSITORY_URL}:${IMAGE_TAG}"
+      - export IMAGE_LATEST="${ECR_REPOSITORY_URL}:latest"
+
+      # Authenticate Docker to ECR
+      - echo "Authenticating with ECR in region ${AWS_DEFAULT_REGION}..."
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REPOSITORY_URL
+
+      # Print environment for debugging
+      - echo "ECR Repository: $ECR_REPOSITORY_URL"
+      - echo "Image Tag: $IMAGE_TAG"
+      - echo "Container Name: $CONTAINER_NAME"
+
+  # ── Build: Build and tag Docker image ─────────────────────────────────────
+  build:
+    commands:
+      - echo "=== Build Phase ==="
+      - echo "Building Docker image..."
+
+      # Build with BuildKit for layer caching and faster builds
+      # --cache-from pulls the last 'latest' image to reuse layers
+      - |
+        docker build \
+          --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+          --build-arg GIT_COMMIT="$CODEBUILD_RESOLVED_SOURCE_VERSION" \
+          --build-arg APP_VERSION="$IMAGE_TAG" \
+          --cache-from "$IMAGE_LATEST" \
+          --tag "$IMAGE_URI" \
+          --tag "$IMAGE_LATEST" \
+          .
+
+      # Run basic smoke test on the built image
+      - echo "Running smoke test..."
+      - docker run --rm --entrypoint "" "$IMAGE_URI" echo "Container smoke test passed"
+
+  # ── Post-Build: Push image and generate deploy artifact ───────────────────
+  post_build:
+    commands:
+      - echo "=== Post-Build Phase ==="
+
+      # Push tagged and latest images to ECR
+      - echo "Pushing image to ECR..."
+      - docker push "$IMAGE_URI"
+      - docker push "$IMAGE_LATEST"
+
+      - echo "Image pushed successfully: $IMAGE_URI"
+
+      # Generate imagedefinitions.json for ECS Deploy action in CodePipeline
+      # This file tells CodePipeline which container to update with which image
+      - |
+        printf '[{"name":"%s","imageUri":"%s"}]' \
+          "$CONTAINER_NAME" \
+          "$IMAGE_URI" \
+          > imagedefinitions.json
+
+      - echo "imagedefinitions.json:"
+      - cat imagedefinitions.json
+
+      - echo "Build completed successfully at $(date)"
+
+# Output artifacts for the CodePipeline Deploy stage
+artifacts:
+  files:
+    - imagedefinitions.json
+  discard-paths: yes
+
+# Cache dependencies to speed up subsequent builds
+cache:
+  paths:
+    # Node.js example (adjust for your stack)
+    # - node_modules/**/*
+    # Python example
+    # - .pip-cache/**/*
+    # Docker layer cache is handled by the CodeBuild project configuration
