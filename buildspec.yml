@@ -14,30 +14,41 @@ env:
 phases:
   pre_build:
     commands:
-      - 'echo "=== Pre-Build Phase ==="'
-      - 'echo "Build started at $(date)"'
-      - 'echo "Git commit SHA: $CODEBUILD_RESOLVED_SOURCE_VERSION"'
-
-      # Set image tag to short commit SHA for traceability
-      - 'export IMAGE_TAG="${CODEBUILD_RESOLVED_SOURCE_VERSION:0:8}"'
-      - 'export IMAGE_URI="${ECR_REPOSITORY_URL}:${IMAGE_TAG}"'
-      - 'export IMAGE_LATEST="${ECR_REPOSITORY_URL}:latest"'
-
-      # Authenticate Docker to ECR
-      - 'echo "Authenticating with ECR in region ${AWS_DEFAULT_REGION}..."'
-      - 'aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$ECR_REPOSITORY_URL"'
-
-      # Print environment for debugging
-      - 'echo "ECR Repository: $ECR_REPOSITORY_URL"'
-      - 'echo "Image Tag: $IMAGE_TAG"'
-      - 'echo "Container Name: $CONTAINER_NAME"'
+      - |
+        echo "=== Pre-Build Phase ==="
+      - |
+        echo "Build started at $(date)"
+      - |
+        echo "Git commit SHA: $CODEBUILD_RESOLVED_SOURCE_VERSION"
+      - |
+        export IMAGE_TAG="${CODEBUILD_RESOLVED_SOURCE_VERSION:0:8}"
+        echo "IMAGE_TAG=$IMAGE_TAG" >> /tmp/build_env
+      - |
+        . /tmp/build_env
+        export IMAGE_URI="${ECR_REPOSITORY_URL}:${IMAGE_TAG}"
+        export IMAGE_LATEST="${ECR_REPOSITORY_URL}:latest"
+        echo "IMAGE_URI=$IMAGE_URI" >> /tmp/build_env
+        echo "IMAGE_LATEST=$IMAGE_LATEST" >> /tmp/build_env
+      - |
+        . /tmp/build_env
+        echo "Authenticating with ECR in region ${AWS_DEFAULT_REGION}"
+        aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$ECR_REPOSITORY_URL"
+      - |
+        . /tmp/build_env
+        echo "ECR Repository = $ECR_REPOSITORY_URL"
+        echo "Image Tag = $IMAGE_TAG"
+        echo "Container Name = $CONTAINER_NAME"
 
   build:
     commands:
-      - 'echo "=== Build Phase ==="'
-      - 'echo "Building Docker image..."'
-
       - |
+        . /tmp/build_env
+        echo "=== Build Phase ==="
+      - |
+        . /tmp/build_env
+        echo "Building Docker image"
+      - |
+        . /tmp/build_env
         docker build \
           --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
           --build-arg GIT_COMMIT="$CODEBUILD_RESOLVED_SOURCE_VERSION" \
@@ -46,28 +57,32 @@ phases:
           --tag "$IMAGE_URI" \
           --tag "$IMAGE_LATEST" \
           .
-
-      - 'echo "Running smoke test..."'
-      - 'docker run --rm --entrypoint "" "$IMAGE_URI" echo "Container smoke test passed"'
+      - |
+        . /tmp/build_env
+        echo "Running smoke test"
+        docker run --rm --entrypoint "" "$IMAGE_URI" echo "Container smoke test passed"
 
   post_build:
     commands:
-      - 'echo "=== Post-Build Phase ==="'
-
-      - 'echo "Pushing image to ECR..."'
-      - 'docker push "$IMAGE_URI"'
-      - 'docker push "$IMAGE_LATEST"'
-      - 'echo "Image pushed successfully: $IMAGE_URI"'
-
       - |
-        printf '[{"name":"%s","imageUri":"%s"}]' \
-          "$CONTAINER_NAME" \
-          "$IMAGE_URI" \
-          > imagedefinitions.json
-
-      - 'echo "imagedefinitions.json:"'
-      - 'cat imagedefinitions.json'
-      - 'echo "Build completed successfully at $(date)"'
+        . /tmp/build_env
+        echo "=== Post-Build Phase ==="
+      - |
+        . /tmp/build_env
+        echo "Pushing image to ECR"
+        docker push "$IMAGE_URI"
+        docker push "$IMAGE_LATEST"
+      - |
+        . /tmp/build_env
+        echo "Image pushed successfully $IMAGE_URI"
+      - |
+        . /tmp/build_env
+        printf '[{"name":"%s","imageUri":"%s"}]' "$CONTAINER_NAME" "$IMAGE_URI" > imagedefinitions.json
+      - |
+        echo "imagedefinitions json content"
+        cat imagedefinitions.json
+      - |
+        echo "Build completed successfully at $(date)"
 
 artifacts:
   files:
